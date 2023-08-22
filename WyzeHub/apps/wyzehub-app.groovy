@@ -615,7 +615,6 @@ def authenticateWyzeAccount(String username, String password, String mfaType = n
 		'path'			     	: "/api/user/login",
 		'body' 					: body
 	]
-    log.debug params
 
 	try {
 		httpPost(params) { response ->
