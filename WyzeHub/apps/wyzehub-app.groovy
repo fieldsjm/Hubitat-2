@@ -87,10 +87,11 @@ String wyzeApiBaseUrl() { return "https://api.wyzecam.com" }
 
 Map wyzeRequestHeaders() {
     return [
-        "x-api-key": "WMXHYf79Nr5gIlt3r0r7p9Tcw5bvs6BB4U8O8nGJ",
-        "Content-Type": "application/json",
-		"Accept": "application/json",
-		"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1 Safari/605.1.15"
+        "keyid":"${settings.key_id}",
+        "apikey":"${settings.api_key}",
+        "Content-Type": "application/json"
+		//"Accept": "application/json",
+		//"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1 Safari/605.1.15"
     ]
 }
 
@@ -224,7 +225,7 @@ def pageMenu()
 		app.removeSetting('deviceGroupsToAdd')
 	}
 	
-	if (!(settings.username && settings.password)) {
+	if (!(settings.username && settings.password && settings.key_id && settings.api_key)) {
 		logDebug('Auth Credentials not set. Forwarding to pageAuthSettings...')
 		return pageAuthSettings()
 	}
@@ -277,6 +278,8 @@ def pageAuthSettings() {
 		section('User Authentication') {
             input name: 'username', type: 'text', title: 'Username', required: true, submitOnChange: true
             input name: 'password', type: 'password', title: 'Password', required: true, submitOnChange: true
+            input name: 'key_id', type: 'text', title: 'Key ID', required: true, submitOnChange: true
+            input name: 'api_key', type: 'text', title: 'Api Key', required: true, submitOnChange: true
         }
 		section('Manually Enter Tokens (Troubleshooting)') {
             input name: 'access_token', type: 'text', title: 'Access Token', required: false, submitOnChange: true
@@ -289,7 +292,7 @@ def pageAuthSettings() {
 def pageDoAuth() {
 	logDebug('pageDoAuth()')
 
-	if (!(settings.username && settings.password)) {
+	if (!(settings.username && settings.password && settings.key_id && settings.api_key)) {
 		logError('Made it to "Do Auth" but credentials not set? Forwarding to pageAuthSettings...')
 		return pageAuthSettings()
 	}
@@ -609,9 +612,10 @@ def authenticateWyzeAccount(String username, String password, String mfaType = n
 		'uri'                	: wyzeAuthBaseUrl(),
 		'headers'            	: wyzeRequestHeaders(),
 		'requestContentType' 	: "application/json; charset=utf-8",
-		'path'			     	: "/user/login",
+		'path'			     	: "/api/user/login",
 		'body' 					: body
 	]
+    log.debug params
 
 	try {
 		httpPost(params) { response ->
@@ -840,6 +844,31 @@ def apiGetDevicePropertyList(String deviceMac, String deviceModel, Closure closu
 
 }
 
+//Polls for the most recent event detected (known for cameras: motion, sound, smoke alarm, CO alarm), limited to 24 hour range
+def apiGetDeviceEventList(String deviceMac, Closure closure = {}) {
+	logDebug("apiGetDeviceEventList()")
+    
+    //24 Hour Search Period
+    def endTime = (new Date()).getTime()
+    def beginTime = endTime - 86400000
+	
+	requestBody = wyzeRequestBody() + [
+		'sv': 'bdcb412e230049c0be0916e75022d3f3',
+		'device_mac': deviceMac,
+        'begin_time': beginTime,
+        'end_time': endTime,
+        'order_by': 2,
+        'count': 1,
+	]
+
+	callbackData = [
+		'deviceNetworkId': deviceMac
+	]
+
+	asyncapiPost('/app/v2/device/get_event_list', requestBody, 'deviceEventValueCallback', callbackData)
+
+}
+
 def apiRunAction(String deviceMac, String deviceModel, String actionKey, Closure closure = {}) {
 	logDebug("apiRunAction()")
 	
@@ -1000,7 +1029,7 @@ private validateApiResponse(response) {
 	if (responseData.code != "1") {
 		logError("API Response error!")
 		logDebug(response.data)
-		throw new Exception("Invalid Response Data Code: ${response.data.code}")
+		throw new Exception("Invalid Response Data Code: ${response.data}")
 	}
 
 	return true
@@ -1027,7 +1056,7 @@ private refreshAccessToken(Closure closure = {}) {
 private void deviceEventsCallback(response, data) {
 	logDebug("deviceEventsCallback() for device ${data.deviceNetworkId}")
 
-	validateApiResponse(response)
+	//validateApiResponse(response)
 
 	if (!response.data) {
 		logError("No response data sent to deviceEventsCallback()")
@@ -1056,6 +1085,45 @@ private void deviceEventsCallback(response, data) {
 	}
 
 	device.createDeviceEventsFromPropertyList(propertyList)
+}
+
+private void deviceEventValueCallback(response, data) {
+	logDebug("deviceEventValueCallback() for device ${data.deviceNetworkId}")
+    
+    //validateApiResponse(response)
+
+	if (!response.data) {
+		logError("No response data sent to deviceEventsCallback()")
+		return;
+	}
+
+	responseData = parseJson(response.data)
+
+	eventList = data.event_list ?: responseData.data.event_list ?: []
+	
+	if (!data.deviceNetworkId) {
+		logDebug('Missing deviceNetworkId')
+		return
+	}
+    
+    if (!eventList) {
+		logDebug("Event List Not Found - ${data.deviceNetworkId}")
+		return
+	}
+
+	parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
+	if (parentNetworkId) {
+		device = getChildDevice(parentNetworkId).getChildDevice(data.deviceNetworkId)
+	} else {
+		device = getChildDevice(data.deviceNetworkId)
+	}
+
+	if (!device) {
+		logDebug("Device ${data.deviceNetworkId} not found")
+		return
+	}
+
+	device.createDeviceEventsFromEventList(eventList)
 }
 
 private String getPhoneId() {
