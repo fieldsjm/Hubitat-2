@@ -1,0 +1,14 @@
+{
+  "author": "Jake Lehner",
+  "gitHubUrl": "https://github.com/fieldsjm",
+  "packages": [
+    {
+      "id": "b61c0689-1ba4-4ac9-a227-b380a354c79c",
+      "name": "WyzeHub",
+      "category": "Integrations",
+      "tags": ["Cloud","Lights & Switches","Multimedia"],
+      "location": "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/packageManifest.json",
+      "description": "Integration for Wyze devices using the Wyze API."
+    }
+  ]
+}
