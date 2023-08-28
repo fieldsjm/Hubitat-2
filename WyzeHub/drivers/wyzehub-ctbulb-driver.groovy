@@ -60,7 +60,7 @@ metadata {
 		name: "WyzeHub Bulb", 
 		namespace: "jakelehner", 
 		author: "Jake Lehner", 
-		importUrl: "https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/drivers/wyzehub-ctbulb-driver.groovy"
+		importUrl: "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/drivers/wyzehub-ctbulb-driver.groovy"
 	) {
 		capability "Light"
 		capability "SwitchLevel"
