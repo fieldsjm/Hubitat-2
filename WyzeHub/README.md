@@ -51,6 +51,7 @@ In process of submitting...
 
 ### Auth Issues
 
+  * API Key is now require, acquired from Wyze at https://support.wyze.com/hc/en-us/articles/16129834216731-Creating-an-API-Key
   * 2FA *should* work. If you have issue authenticating using 2FA, disable 2FA on your Wyze account and re-enable after connecting WyzeHub.
   * Token refreshing still isn't perfect, and Wyze also seems to randomly flag tokens with a rate limit. 
     * If your devices stop working, it is likely due to a token issue. Check the log for errors.
