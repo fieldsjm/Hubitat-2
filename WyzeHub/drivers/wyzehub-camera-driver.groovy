@@ -95,7 +95,7 @@ metadata {
 		name: "WyzeHub Camera", 
 		namespace: "jakelehner", 
 		author: "Jake Lehner", 
-		importUrl: "https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/drivers/wyzehub-camera-driver.groovy"
+		importUrl: "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-driver.groovy"
 	) {
 		capability "CarbonMonoxideDetector"
         capability "MotionSensor"
