@@ -121,7 +121,7 @@ definition(
 	installOnOpen: true,
 	singleInstance: true,
 	oauth: false,
-	importUrl: 'https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/apps/wyzehub-app.groovy'
+	importUrl: 'https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/apps/wyzehub-app.groovy'
 )
 
 preferences 
