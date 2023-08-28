@@ -31,6 +31,8 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.4 - Added API Key requirement. (Modified by @fieldsjm)
+ *   ---------------------------------
  *   v1.3 - Address issue with refresh token logic.
  *        - Add Light Strip Support (non-pro)
  *   v1.2 - Bugfix allowing Meshlight to be used with rules engine (thanks @bruderbell!)
