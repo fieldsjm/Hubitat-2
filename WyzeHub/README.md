@@ -26,7 +26,7 @@ Support is currently limiited to devices I have on hand. Devices will be added a
 
 ## Installation w/ Hubitat Package Manager (Recommended)
 
-In process of submitting...
+* Pull request submitted to add updated code...
 
 ## Installtion (Manual Method)
 1. Back up your hub or live dangerously.
