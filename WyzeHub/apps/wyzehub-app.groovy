@@ -1069,7 +1069,7 @@ private void deviceEventsCallback(response, data) {
 	propertyList = data.propertyList ?: responseData.data.property_list ?: []
 	
 	if (!(data.deviceNetworkId && propertyList)) {
-		logDebug('Missing deviceNetworkId or propertyList')
+		logError('Missing deviceNetworkId or propertyList')
 		return
 	}
 
