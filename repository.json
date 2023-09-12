@@ -4,11 +4,11 @@
   "packages": [
     {
       "id": "b61c0689-1ba4-4ac9-a227-b380a354c79c",
-      "name": "WyzeHub",
+      "name": "WyzeHub (Updated to Use API Key)",
       "category": "Integrations",
       "tags": ["Cloud","Lights & Switches","Multimedia"],
       "location": "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/packageManifest.json",
-      "description": "Integration for Wyze devices using the Wyze API."
+      "description": "Integration for Wyze devices using the Wyze API (Key Required)."
     }
   ]
 }
