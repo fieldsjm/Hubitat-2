@@ -1057,7 +1057,7 @@ private refreshAccessToken(Closure closure = {}) {
 private void deviceEventsCallback(response, data) {
 	logDebug("deviceEventsCallback() for device ${data.deviceNetworkId}")
 
-	//validateApiResponse(response)
+	validateApiResponse(response)
 
 	if (!response.data) {
 		logError("No response data sent to deviceEventsCallback()")
@@ -1091,7 +1091,7 @@ private void deviceEventsCallback(response, data) {
 private void deviceEventValueCallback(response, data) {
 	logDebug("deviceEventValueCallback() for device ${data.deviceNetworkId}")
     
-    //validateApiResponse(response)
+    validateApiResponse(response)
 
 	if (!response.data) {
 		logError("No response data sent to deviceEventsCallback()")
