@@ -31,7 +31,9 @@
  * ===================================================================================
  * 
  * Release Notes:
- *   v1.4 - Added API Key requirement. (Modified by @fieldsjm)
+ *   v1.4 - Bug Fix - validateAPI to call refreshToken.
+ *   v1.4 - Added API Key requirement.
+ *   (Modified by @fieldsjm)
  *   ---------------------------------
  *   v1.3 - Address issue with refresh token logic.
  *        - Add Light Strip Support (non-pro)
@@ -50,7 +52,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.4" }
+public static final String version() { return "v1.5" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
