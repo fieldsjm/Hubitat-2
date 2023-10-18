@@ -31,7 +31,7 @@
  * ===================================================================================
  * 
  * Release Notes:
- *   v1.4 - Bug Fix - validateAPI to call refreshToken.
+ *   v1.5 - Bug Fix - validateAPI to call refreshToken.
  *   v1.4 - Added API Key requirement.
  *   (Modified by @fieldsjm)
  *   ---------------------------------
