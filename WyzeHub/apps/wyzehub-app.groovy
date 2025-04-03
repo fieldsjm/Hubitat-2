@@ -31,6 +31,7 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.6 - Add Color Bulb group 12
  *   v1.5 - Bug Fix - validateAPI to call refreshToken.
  *   v1.4 - Added API Key requirement.
  *   (Modified by @fieldsjm)
@@ -60,10 +61,11 @@ public static final String apiAppVersion() { return "2.19.14" }
 @Field static final String childNamespace = "jakelehner" 
 
 @Field static final Map groupDriverMap = [
-    1: [label: 'Camera Group', driver: 'WyzeHub Camera Group'],
+	1: [label: 'Camera Group', driver: 'WyzeHub Camera Group'],
 	2: [label: 'Bulb Group', driver: 'WyzeHub Bulb Group'],
-    5: [label: 'Plug Group', driver: 'WyzeHub Plug Group'],
-    8: [label: 'Color Bulb Group', driver: 'WyzeHub Color Bulb Group'],
+	5: [label: 'Plug Group', driver: 'WyzeHub Plug Group'],
+	8: [label: 'Color Bulb Group', driver: 'WyzeHub Color Bulb Group'],
+	12: [label: 'Color Bulb Group', driver: 'WyzeHub Color Bulb Group']
 ]
 @Field static final List ignoreDeviceModels = [
 	'WLPPO'
