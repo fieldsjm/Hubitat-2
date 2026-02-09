@@ -38,9 +38,12 @@
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.4"  }
+public static String version() {  return "v1.7"  }
 
 public String deviceModel() { return device.getDataValue('product_model') ?: 'WYZEC1-JZ' }
+
+// Models that use the devicemgmt API — legacy property polling returns stale P3 for these
+@Field static final List deviceMgmtApiModels = ['GW_GC1', 'GW_GC2', 'LD_CFP', 'AN_RSCW']
 
 @Field static final String wyze_action_power_on = 'power_on'
 @Field static final String wyze_action_power_off = 'power_off'
@@ -113,67 +116,60 @@ metadata {
 		attribute "online", "enum", ["true","false"]
         attribute "objects_detected", "string"  //any AI detected objects (person, package, vehicle, pet, etc)
         
-        command "settingsRefresh"
+        command "settingsRefresh", [[
+            "name":"Description",
+            "description":"Poll camera settings (power, notifications, recording). Runs automatically on the Device Polling Interval.",
+            "type":"STRING"
+        ]]
         command(
-             "setMotionRecording", 
-             [
-                [
-                     "name":"motion_record*",
-                     "description":"Set value to true/false to enable/disable event recording based on motion",
-                     "type":"ENUM",
-                     "constraints":["true","false"]
-                ]
-             ]
+             "setMotionRecording",
+             [[
+                 "name":"Enable*",
+                 "description":"Enable or disable event recording triggered by motion detection",
+                 "type":"ENUM",
+                 "constraints":["true","false"]
+             ]]
         )
         command(
-             "setAllNotifications", 
-             [
-                [
-                     "name":"all_notify*",
-                     "description":"Set value to true/false to enable/disable all notifications",
-                     "type":"ENUM",
-                     "constraints":["true","false"]
-                ]
-             ]
+             "setAllNotifications",
+             [[
+                 "name":"Enable*",
+                 "description":"Enable or disable all push notifications (motion, sound, etc.)",
+                 "type":"ENUM",
+                 "constraints":["true","false"]
+             ]]
         )
         command(
-             "setMotionNotification", 
-             [
-                [
-                     "name":"motion_notify*",
-                     "description":"Set value to true/false to enable/disable notifications based on motion recording",
-                     "type":"ENUM",
-                     "constraints":["true","false"]
-                ]
-             ]
+             "setMotionNotification",
+             [[
+                 "name":"Enable*",
+                 "description":"Enable or disable push notifications triggered by motion events",
+                 "type":"ENUM",
+                 "constraints":["true","false"]
+             ]]
         )
         command(
-             "setSoundNotification", 
-             [
-                [
-                     "name":"sound_notify*",
-                     "description":"Set value to true/false to enable/disable notifications based on sound recording",
-                     "type":"ENUM",
-                     "constraints":["true","false"]
-                ]
-             ]
+             "setSoundNotification",
+             [[
+                 "name":"Enable*",
+                 "description":"Enable or disable push notifications triggered by sound events",
+                 "type":"ENUM",
+                 "constraints":["true","false"]
+             ]]
         )
-		command(
-			"Floodlight On",
-			[
-				[
-					"name":"floodlight_powerstate",
-					"description":"Set value to true/false to enable/disable floodlight",
-                     "type":"ENUM",
-                     "constraints":["true","false"]
-			]
-				 ]
-			)
+        command(
+            "setFloodlightPowerstate",
+            [[
+                "name":"Enable*",
+                "description":"Turn the floodlight on or off (floodlight-equipped cameras only)",
+                "type":"ENUM",
+                "constraints":["true","false"]
+            ]]
+        )
 	}
 
 	preferences {
-        input "SETTING_DEVICE_POLL", "number", title: "Device Polling Interval", description: "Change polling frequency of settings (minutes); 0 to disable polling", defaultValue:5, required: true, displayDuringSetup: true
-        input "SETTING_EVENT_POLL", "number", title: "Event Polling Interval", description: "Change polling frequency of events (seconds); 0 to disable polling", defaultValue:120, required: true, displayDuringSetup: true
+        input "SETTING_EVENT_POLL", "number", title: "Polling Interval", description: "How often to poll device state and events (seconds); 0 to disable polling", defaultValue:120, required: true, displayDuringSetup: true
         input "SETTING_EVT_VARIANCE", "number", title: "Time since Event", description: "Input desired time since last event to be considered active (minutes)", defaultValue:1, required: true, displayDuringSetup: true
         input "SETTING_INACTIVE_TIME", "number", title: "Time to Deactivate Events", description: "Input desired time since last event to automatically deactivate (seconds)", defaultValue:30, required: true, displayDuringSetup: true
 	}
@@ -188,15 +184,13 @@ void installed() {
 
 void updated() {
     def msg = 'updated'
-    if(SETTING_DEVICE_POLL == 0) msg += ", disabling polling for device settings"
-    if(SETTING_EVENT_POLL == 0) msg += ", disabling polling for events"
+    if(SETTING_EVENT_POLL == 0) msg += ", disabling polling"
     logWarn(msg)
     initialize()
 }
 
 void initialize() {
     logWarn("initialize()")
-    settingsRefresh()
     refresh()
 }
 
@@ -204,25 +198,19 @@ void parse(String description) {
     logWarn("Running unimplemented parse for: '${description}'")
 }
 
-//Returns device settings (properties)
 def settingsRefresh() {
-    unschedule('settingsRefresh')
     app = getApp()
-	logInfo("Refresh Device Data")
+	logInfo("settingsRefresh: ${device.deviceNetworkId} (model: ${deviceModel()})")
 	app.apiGetDevicePropertyList(device.deviceNetworkId, deviceModel()) { propertyList ->
 		createDeviceEventsFromPropertyList(propertyList)
 	}
-    if(SETTING_DEVICE_POLL != 0) {
-        def devicePoll = SETTING_DEVICE_POLL*60
-        runIn(devicePoll, settingsRefresh)
-    }
 }
 
-//Returns most recent recording event (search is limited to last 24 hours), known camera events motion, sound, smoke alarm, CO alarm
 def refresh() {
     unschedule('refresh')
     app = getApp()
-	logInfo("Refreshing Recorded Events")
+	logInfo("Refreshing Device Properties and Events")
+	settingsRefresh()
     app.apiGetDeviceEventList(device.deviceNetworkId) { eventList ->
 		createDeviceEventsFromEventList(eventList)
 	}
@@ -232,14 +220,14 @@ def refresh() {
 
 def on() {
 	app = getApp()
-	logInfo("'On' Pressed")
+	logInfo("'On' Pressed for ${device.deviceNetworkId} (model: ${deviceModel()})")
 
 	app.apiRunAction(device.deviceNetworkId, deviceModel(), wyze_action_power_on)
 }
 
 def off() {
 	app = getApp()
-	logInfo("'Off' Pressed")
+	logInfo("'Off' Pressed for ${device.deviceNetworkId} (model: ${deviceModel()})")
 
 	app.apiRunAction(device.deviceNetworkId, deviceModel(), wyze_action_power_off)
 }
@@ -307,18 +295,27 @@ private sendProperty(pid, pvalue) {
     
 void createDeviceEventsFromPropertyList(List propertyList) {
 	app = getApp()
-    //logDebug(propertyList)
+    logDebug("createDeviceEventsFromPropertyList: ${device.deviceNetworkId} received ${propertyList.size()} properties")
     String eventName, eventUnit
     def eventValue // could be String or number
 
     propertyList.each { property ->
-	
+
 		propertyValue = property.value ?: property.pvalue ?: null
+		logDebug("  Property: pid=${property.pid}, value=${propertyValue}")
 		switch(property.pid) {
             // Switch State
 			case wyze_action_power_on:
 			case wyze_action_power_off:
             case wyze_property_power:
+			case 'power':
+				// Legacy API returns stale P3 for devicemgmt models — only trust
+				// power state from on/off command callbacks (power_on/power_off pid)
+				if (property.pid == wyze_property_power && deviceMgmtApiModels.contains(deviceModel())) {
+					logDebug("Skipping stale P3 from legacy API for devicemgmt model ${deviceModel()}")
+					break
+				}
+
 				eventName = "switch"
                 eventUnit = null
 
@@ -333,9 +330,10 @@ void createDeviceEventsFromPropertyList(List propertyList) {
 				if (device.currentValue(eventName) != eventValue) {
 					logDebug("Updating Property 'switch' to ${eventValue}")
 					app.doSendDeviceEvent(device, eventName, eventValue, eventUnit)
+					notifyParentGroup()
 				}
             break
-        
+
             // Device Online
             case wyze_property_device_online:
                 eventName = "online"
@@ -544,6 +542,18 @@ void autoObjNone() {
     eventName = "objects_detected"
     eventValue = "None"
     app.doSendDeviceEvent(device, eventName, eventValue, eventUnit)
+}
+
+private notifyParentGroup() {
+	try {
+		def parent = getParent()
+		if (parent && parent.name != "WyzeHub") {
+			logDebug("Notifying parent group ${parent.displayName} to update state in 3s")
+			parent.runIn(3, 'updateGroupState')
+		}
+	} catch (Exception e) {
+		logDebug("No parent group to notify: ${e}")
+	}
 }
 
 private getApp() {

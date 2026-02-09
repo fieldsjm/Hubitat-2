@@ -32,27 +32,48 @@
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.4"  }
+public static String version() {  return "v1.7"  }
 
-public String deviceModel() { return 'WYZEC1-JZ' }
+public String deviceModel() { return '' }
 
 public String groupTypeId() { return 1 }
 
 metadata {
 	definition(
-		name: "WyzeHub Camera Group", 
-		namespace: "jakelehner", 
-		author: "Jake Lehner", 
+		name: "WyzeHub Camera Group",
+		namespace: "jakelehner",
+		author: "Jake Lehner",
 		importUrl: "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-group-driver.groovy"
 	) {
 		capability "Outlet"
 		capability "Refresh"
+		capability "Switch"
+
+		attribute "allOn", "enum", ["true", "false"]
+		attribute "allOff", "enum", ["true", "false"]
+
+		command "updateGroupState", [[
+			"name":"Description",
+			"description":"Recalculate group switch, allOn, and allOff states from current child camera states",
+			"type":"STRING"
+		]]
     }
+
+	preferences {
+		input "SWITCH_MODE", "enum", title: "Switch 'on' when...",
+			description: "Determines when the group switch reports 'on'",
+			options: [["any": "Any camera is on"], ["all": "All cameras are on"]],
+			defaultValue: "any", required: true, displayDuringSetup: true
+	}
 }
 
 void installed() {
     app = getApp()
 	logDebug("installed()")
+
+	sendEvent(name: 'switch', value: 'off')
+	sendEvent(name: 'allOn', value: 'false')
+	sendEvent(name: 'allOff', value: 'true')
 
 	refresh()
 	initialize()
@@ -61,6 +82,7 @@ void installed() {
 void updated() {
     app = getApp()
 	logDebug("updated()")
+	updateGroupState()
     initialize()
 }
 
@@ -75,20 +97,60 @@ void parse(String description) {
 }
 
 def refresh() {
-	getChildDevices().each { device -> 
-		device.refresh()
+	getChildDevices().each { childDevice ->
+		childDevice.settingsRefresh()
+		childDevice.refresh()
 	}
+	runIn(15, 'updateGroupState')
 }
 
 def on() {
-	getChildDevices().each { device -> 
-		device.on()
+	getChildDevices().each { childDevice ->
+		childDevice.on()
 	}
+	runIn(10, 'updateGroupState')
 }
 
 def off() {
-	getChildDevices().each { device -> 
-		device.off()
+	getChildDevices().each { childDevice ->
+		childDevice.off()
+	}
+	runIn(10, 'updateGroupState')
+}
+
+void updateGroupState() {
+	logDebug("updateGroupState()")
+
+	def children = getChildDevices()
+	if (!children) {
+		logDebug("No child devices found")
+		return
+	}
+
+	int onCount = children.count { it.currentValue("switch") == "on" }
+	int totalCount = children.size()
+
+	String allOnValue = (onCount == totalCount) ? "true" : "false"
+	String allOffValue = (onCount == 0) ? "true" : "false"
+
+	String switchMode = settings.SWITCH_MODE ?: "any"
+	String switchValue
+	if (switchMode == "all") {
+		switchValue = (onCount == totalCount) ? "on" : "off"
+	} else {
+		switchValue = (onCount > 0) ? "on" : "off"
+	}
+
+	logDebug("Group state: ${onCount}/${totalCount} on, mode=${switchMode}, switch=${switchValue}, allOn=${allOnValue}, allOff=${allOffValue}")
+
+	if (device.currentValue("allOn") != allOnValue) {
+		sendEvent(name: "allOn", value: allOnValue, descriptionText: "${device.displayName} allOn is ${allOnValue}")
+	}
+	if (device.currentValue("allOff") != allOffValue) {
+		sendEvent(name: "allOff", value: allOffValue, descriptionText: "${device.displayName} allOff is ${allOffValue}")
+	}
+	if (device.currentValue("switch") != switchValue) {
+		sendEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} switch is ${switchValue}")
 	}
 }
 

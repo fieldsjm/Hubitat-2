@@ -31,6 +31,10 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.7 - Device Management API for newer cameras (Cam OG, etc).
+ *        - Fix async callback error handling.
+ *        - Camera group switch state tracking.
+ *        - Improve auth settings page.
  *   v1.6 - Add Color Bulb group 12
  *   v1.5 - Bug Fix - validateAPI to call refreshToken.
  *   v1.4 - Added API Key requirement.
@@ -53,7 +57,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.5" }
+public static final String version() { return "v1.7" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
@@ -70,6 +74,8 @@ public static final String apiAppVersion() { return "2.19.14" }
 @Field static final List ignoreDeviceModels = [
 	'WLPPO'
 ]
+@Field static final List deviceMgmtApiModels = ['GW_GC1', 'GW_GC2', 'LD_CFP', 'AN_RSCW']
+
 @Field static final Map driverMap = [
 	'Light': [label: 'Bulb', driver: 'WyzeHub Bulb'],
 	'MeshLight': [label: 'Color Bulb', driver: 'WyzeHub Color Bulb'],
@@ -90,6 +96,11 @@ public static final String apiAppVersion() { return "2.19.14" }
 
 String wyzeAuthBaseUrl() { return "https://auth-prod.api.wyze.com" }
 String wyzeApiBaseUrl() { return "https://api.wyzecam.com" }
+String wyzeDeviceMgmtBaseUrl() { return "https://devicemgmt-service-beta.wyze.com" }
+
+Boolean isDeviceMgmtModel(String model) {
+	return deviceMgmtApiModels.contains(model)
+}
 
 Map wyzeRequestHeaders() {
     return [
@@ -282,10 +293,14 @@ def pageAuthSettings() {
 		nextPage: 'pageDoAuth'
 	) {
 		section('User Authentication') {
-            input name: 'username', type: 'text', title: 'Username', required: true, submitOnChange: true
+            paragraph 'Enter your Wyze account email and password.'
+            input name: 'username', type: 'text', title: 'Username (Email)', required: true, submitOnChange: true
             input name: 'password', type: 'password', title: 'Password', required: true, submitOnChange: true
+        }
+		section('API Key') {
+            paragraph 'An API Key ID and API Key are required. Generate them at the <a href="https://developer-api-console.wyze.com/" target="_blank">Wyze Developer Console</a>: sign in with your Wyze account, then click "Create an API key". Copy both the Key ID and API Key.'
             input name: 'key_id', type: 'text', title: 'Key ID', required: true, submitOnChange: true
-            input name: 'api_key', type: 'text', title: 'Api Key', required: true, submitOnChange: true
+            input name: 'api_key', type: 'text', title: 'API Key', required: true, submitOnChange: true
         }
 		section('Manually Enter Tokens (Troubleshooting)') {
             input name: 'access_token', type: 'text', title: 'Access Token', required: false, submitOnChange: true
@@ -822,10 +837,6 @@ private def doSendDeviceEvent(com.hubitat.app.DeviceWrapper device, eventName, e
 		'isStateChange': true
 	]
 
-	if (eventUnit) {
-		properties['eventUnit'] = eventUnit
-	}
-
 	logDebug('Sending event data...')
 	logDebug(eventData)
 
@@ -834,19 +845,55 @@ private def doSendDeviceEvent(com.hubitat.app.DeviceWrapper device, eventName, e
 
 def apiGetDevicePropertyList(String deviceMac, String deviceModel, Closure closure = {}) {
 	logDebug("apiGetDevicePropertyList()")
-	
-	requestBody = wyzeRequestBody() + [
-		'sv': 'c417b62d72ee44bf933054bdca183e77',
-		'device_mac': deviceMac,
-    	'device_model': deviceModel
+
+	if (isDeviceMgmtModel(deviceModel)) {
+		logInfo("apiGetDevicePropertyList: using devicemgmt API for model ${deviceModel}")
+		apiGetDevicePropertyListDeviceMgmt(deviceMac, deviceModel, closure)
+	} else {
+		requestBody = wyzeRequestBody() + [
+			'sv': 'c417b62d72ee44bf933054bdca183e77',
+			'device_mac': deviceMac,
+			'device_model': deviceModel
+		]
+
+		callbackData = [
+			'deviceNetworkId': deviceMac
+		]
+
+		asyncapiPost('/app/v2/device/get_property_list', requestBody, 'deviceEventsCallback', callbackData)
+	}
+}
+
+private def apiGetDevicePropertyListDeviceMgmt(String deviceMac, String deviceModel, Closure closure = {}) {
+	logDebug("apiGetDevicePropertyListDeviceMgmt()")
+
+	// Request iot-device properties (power state) from devicemgmt API
+	requestBody = [
+		'capabilities': [
+			[
+				'iid': 1,
+				'name': 'iot-device',
+				'properties': ['iot-state', 'iot-power', 'push-switch']
+			],
+			[
+				'iid': 2,
+				'name': 'camera',
+				'properties': ['motion-detect-recording']
+			]
+		],
+		'nonce': (new Date()).getTime(),
+		'targetInfo': [
+			'id': deviceMac,
+			'productModel': deviceModel,
+			'type': 'DEVICE'
+		]
 	]
 
 	callbackData = [
 		'deviceNetworkId': deviceMac
 	]
 
-	asyncapiPost('/app/v2/device/get_property_list', requestBody, 'deviceEventsCallback', callbackData)
-
+	asyncapiPostDeviceMgmt('/device-management/api/device-property/get_iot_prop', requestBody, 'deviceMgmtPropertyCallback', callbackData)
 }
 
 //Polls for the most recent event detected (known for cameras: motion, sound, smoke alarm, CO alarm), limited to 24 hour range
@@ -876,9 +923,21 @@ def apiGetDeviceEventList(String deviceMac, Closure closure = {}) {
 
 def apiRunAction(String deviceMac, String deviceModel, String actionKey, Closure closure = {}) {
 	logDebug("apiRunAction()")
-	
+	logInfo("apiRunAction: mac=${deviceMac}, model=${deviceModel}, actionKey=${actionKey}")
+
+	if (isDeviceMgmtModel(deviceModel)) {
+		logInfo("Routing to Device Management API for model ${deviceModel}")
+		apiRunActionDeviceMgmt(deviceMac, deviceModel, actionKey, closure)
+	} else {
+		apiRunActionLegacy(deviceMac, deviceModel, actionKey, closure)
+	}
+}
+
+private def apiRunActionLegacy(String deviceMac, String deviceModel, String actionKey, Closure closure = {}) {
+	logDebug("apiRunActionLegacy()")
+
 	requestBody = wyzeRequestBody() + [
-		'sv': '011a6b42d80a4f32b4cc24bb721c9c96', 
+		'sv': '011a6b42d80a4f32b4cc24bb721c9c96',
 		'action_key': actionKey,
 		'action_params': [:],
 		'instance_id': deviceMac,
@@ -896,7 +955,56 @@ def apiRunAction(String deviceMac, String deviceModel, String actionKey, Closure
 	]
 
 	asyncapiPost('/app/v2/auto/run_action', requestBody, 'deviceEventsCallback', callbackData)
-	
+}
+
+private def apiRunActionDeviceMgmt(String deviceMac, String deviceModel, String actionKey, Closure closure = {}) {
+	logDebug("apiRunActionDeviceMgmt()")
+
+	// Map legacy action keys to devicemgmt capability values
+	String capabilityValue
+	if (actionKey == 'power_on') {
+		capabilityValue = 'wakeup'
+	} else if (actionKey == 'power_off') {
+		capabilityValue = 'sleep'
+	} else {
+		logWarn("apiRunActionDeviceMgmt: unsupported actionKey '${actionKey}', falling back to legacy API")
+		apiRunActionLegacy(deviceMac, deviceModel, actionKey, closure)
+		return
+	}
+
+	// Payload format per wyzeapy reference implementation
+	Map capability = [
+		'functions': [
+			['in': ['wakeup-live-view': '1'], 'name': capabilityValue]
+		],
+		'iid': 1,
+		'name': 'iot-device'
+	]
+
+	requestBody = [
+		'capabilities': [capability],
+		'nonce': (new Date()).getTime(),
+		'targetInfo': [
+			'id': deviceMac,
+			'productModel': deviceModel,
+			'type': 'DEVICE'
+		],
+		'transactionId': '0a5b20591fedd4du1b93f90743ba0csd'
+	]
+
+	// Map back to standard property format for the callback
+	callbackData = [
+		'deviceNetworkId': deviceMac,
+		'propertyList': [
+			[
+				'pid': actionKey,
+				'pvalue': actionKey
+			]
+		]
+	]
+
+	logInfo("apiRunActionDeviceMgmt: sending power=${capabilityValue} for ${deviceMac}")
+	asyncapiPostDeviceMgmt('/device-management/api/action/run_action', requestBody, 'deviceEventsCallback', callbackData)
 }
 
 def apiRunActionList(String deviceMac, String deviceModel, List actionList) {
@@ -970,7 +1078,25 @@ def asyncapiPost(String path, Map body = [:], String callbackMethod = null, Map 
 		'body'        : bodyJson
 	]
 
-	asynchttpPost(callbackMethod, params, callbackData) 
+	asynchttpPost(callbackMethod, params, callbackData)
+}
+
+def asyncapiPostDeviceMgmt(String path, Map body = [:], String callbackMethod = null, Map callbackData = [:]) {
+	logDebug('asyncapiPostDeviceMgmt()')
+	bodyJson = (new JsonBuilder(body)).toString()
+
+	params = [
+		'uri'         : wyzeDeviceMgmtBaseUrl(),
+		'headers'     : [
+			'authorization': state.access_token,
+			'Content-Type': 'application/json'
+		],
+		'contentType' : 'application/json',
+		'path'        : path,
+		'body'        : bodyJson
+	]
+
+	asynchttpPost(callbackMethod, params, callbackData)
 }
 
 def apiPost(String path, Map body = [], Closure closure = {}) {
@@ -1016,7 +1142,10 @@ private validateApiResponse(response) {
 		responseData = response.data
 	}
 
-	if (responseData.code == "2001") {
+	// Normalize code to string for comparison (API may return integer or string)
+	String codeStr = responseData.code?.toString()
+
+	if (codeStr == "2001") {
 		logError("Access Token Invalid. Attempting to refresh token.")
 		logDebug(response.data)
 		refreshAccessToken() { refreshTokenResponse ->
@@ -1024,17 +1153,62 @@ private validateApiResponse(response) {
 		}
 	}
 
-	if (responseData.code == "2002") {
+	if (codeStr == "2002") {
 		// Refresh Token Error
 		logError("Refresh Token Invalid.")
 		clearState()
 		throw new Exception("Refresh Token Invalid")
 	}
 
-	if (responseData.code != "1") {
+	if (codeStr != "1") {
 		logError("API Response error!")
 		logDebug(response.data)
 		throw new Exception("Invalid Response Data Code: ${response.data}")
+	}
+
+	return true
+}
+
+private Boolean validateAsyncApiResponse(response) {
+	logDebug("validateAsyncApiResponse()")
+
+	if (response.hasError()) {
+		logError("Async API response has error: status=${response.status}, errorMessage=${response.getErrorMessage()}")
+		return false
+	}
+
+	if (!response.getData()) {
+		logError("Async API response has no data")
+		return false
+	}
+
+	try {
+		responseData = parseJson(response.getData())
+	} catch (Exception e) {
+		logError("Failed to parse async API response JSON: ${e}")
+		return false
+	}
+
+	// Normalize code to string for comparison (API may return integer or string)
+	String codeStr = responseData.code?.toString()
+
+	if (codeStr == "2001") {
+		logError("Access Token Invalid (async). Attempting to refresh token.")
+		refreshAccessToken()
+		return false
+	}
+
+	if (codeStr == "2002") {
+		logError("Refresh Token Invalid (async).")
+		clearState()
+		return false
+	}
+
+	// Device management API responses may not include a code field
+	if (codeStr != null && codeStr != "1") {
+		logError("Async API response error: code=${codeStr}, msg=${responseData.msg}")
+		logDebug("Full response data: ${response.getData()}")
+		return false
 	}
 
 	return true
@@ -1058,77 +1232,151 @@ private refreshAccessToken(Closure closure = {}) {
 	}
 }
 
+private void deviceMgmtPropertyCallback(response, data) {
+	logDebug("deviceMgmtPropertyCallback() for device ${data?.deviceNetworkId}")
+
+	try {
+		if (!validateAsyncApiResponse(response)) {
+			return
+		}
+
+		responseData = parseJson(response.getData())
+
+		// Parse devicemgmt capabilities response into standard property list format
+		List propertyList = []
+		List capabilities = responseData?.data?.capabilities ?: responseData?.capabilities ?: []
+
+		capabilities.each { capability ->
+			String capName = capability.name
+			Map props = capability.properties ?: [:]
+
+			if (capName == 'iot-device') {
+				// iot-power maps to switch state
+				if (props.containsKey('iot-power')) {
+					String powerValue = props['iot-power']?.toString()
+					Boolean powerOn = (powerValue == '1' || powerValue == 'true')
+					propertyList << [
+						'pid': 'power',
+						'pvalue': powerOn ? 'power_on' : 'power_off'
+					]
+				}
+				// iot-state maps to online/available
+				if (props.containsKey('iot-state')) {
+					String stateValue = props['iot-state']?.toString()
+					String normalizedState = (stateValue == '1' || stateValue == 'true') ? '1' : '0'
+					propertyList << ['pid': 'P5', 'pvalue': normalizedState]
+				}
+				// push-switch maps to notifications
+				if (props.containsKey('push-switch')) {
+					String pushValue = props['push-switch']?.toString()
+					String normalizedPush = (pushValue == '1' || pushValue == 'true') ? '1' : '0'
+					propertyList << ['pid': 'P1', 'pvalue': normalizedPush]
+				}
+			} else if (capName == 'camera') {
+				if (props.containsKey('motion-detect-recording')) {
+					String recordValue = props['motion-detect-recording']?.toString()
+					String normalizedRecord = (recordValue == '1' || recordValue == 'true') ? '1' : '0'
+					propertyList << ['pid': 'P1001', 'pvalue': normalizedRecord]
+				}
+			}
+		}
+
+		if (!(data?.deviceNetworkId && propertyList)) {
+			return
+		}
+
+		parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
+		if (parentNetworkId) {
+			parentDevice = getChildDevice(parentNetworkId)
+			device = parentDevice?.getChildDevice(data.deviceNetworkId)
+		} else {
+			device = getChildDevice(data.deviceNetworkId)
+		}
+
+		if (!device) {
+			logDebug("Device ${data.deviceNetworkId} not found")
+			return
+		}
+
+		device.createDeviceEventsFromPropertyList(propertyList)
+	} catch (Exception e) {
+		logError("deviceMgmtPropertyCallback exception for device ${data?.deviceNetworkId}: ${e}")
+	}
+}
+
 private void deviceEventsCallback(response, data) {
-	logDebug("deviceEventsCallback() for device ${data.deviceNetworkId}")
+	logDebug("deviceEventsCallback() for device ${data?.deviceNetworkId}")
 
-	validateApiResponse(response)
+	try {
+		if (!validateAsyncApiResponse(response)) {
+			return
+		}
 
-	if (!response.data) {
-		logError("No response data sent to deviceEventsCallback()")
-		return;
+		responseData = parseJson(response.getData())
+		propertyList = data?.propertyList ?: responseData?.data?.property_list ?: []
+
+		if (!(data?.deviceNetworkId && propertyList)) {
+			return
+		}
+
+		parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
+		if (parentNetworkId) {
+			parentDevice = getChildDevice(parentNetworkId)
+			device = parentDevice?.getChildDevice(data.deviceNetworkId)
+		} else {
+			device = getChildDevice(data.deviceNetworkId)
+		}
+
+		if (!device) {
+			logDebug("Device ${data.deviceNetworkId} not found")
+			return
+		}
+
+		device.createDeviceEventsFromPropertyList(propertyList)
+	} catch (Exception e) {
+		logError("deviceEventsCallback exception for device ${data?.deviceNetworkId}: ${e}")
 	}
-
-	responseData = parseJson(response.data)
-
-	propertyList = data.propertyList ?: responseData.data.property_list ?: []
-	
-	if (!(data.deviceNetworkId && propertyList)) {
-		logError('Missing deviceNetworkId or propertyList')
-		return
-	}
-
-	parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
-	if (parentNetworkId) {
-		device = getChildDevice(parentNetworkId).getChildDevice(data.deviceNetworkId)
-	} else {
-		device = getChildDevice(data.deviceNetworkId)
-	}
-
-	if (!device) {
-		logDebug("Device ${data.deviceNetworkId} not found")
-		return
-	}
-
-	device.createDeviceEventsFromPropertyList(propertyList)
 }
 
 private void deviceEventValueCallback(response, data) {
-	logDebug("deviceEventValueCallback() for device ${data.deviceNetworkId}")
-    
-    validateApiResponse(response)
+	logDebug("deviceEventValueCallback() for device ${data?.deviceNetworkId}")
 
-	if (!response.data) {
-		logError("No response data sent to deviceEventsCallback()")
-		return;
+	try {
+		if (!validateAsyncApiResponse(response)) {
+			return
+		}
+
+		responseData = parseJson(response.getData())
+
+		eventList = data?.event_list ?: responseData?.data?.event_list ?: []
+
+		if (!data?.deviceNetworkId) {
+			logDebug('Missing deviceNetworkId')
+			return
+		}
+
+		if (!eventList) {
+			logDebug("Event List Not Found - ${data.deviceNetworkId}")
+			return
+		}
+
+		parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
+		if (parentNetworkId) {
+			parentDevice = getChildDevice(parentNetworkId)
+			device = parentDevice?.getChildDevice(data.deviceNetworkId)
+		} else {
+			device = getChildDevice(data.deviceNetworkId)
+		}
+
+		if (!device) {
+			logDebug("Device ${data.deviceNetworkId} not found")
+			return
+		}
+
+		device.createDeviceEventsFromEventList(eventList)
+	} catch (Exception e) {
+		logError("deviceEventValueCallback exception for device ${data?.deviceNetworkId}: ${e}")
 	}
-
-	responseData = parseJson(response.data)
-
-	eventList = data.event_list ?: responseData.data.event_list ?: []
-	
-	if (!data.deviceNetworkId) {
-		logDebug('Missing deviceNetworkId')
-		return
-	}
-    
-    if (!eventList) {
-		logDebug("Event List Not Found - ${data.deviceNetworkId}")
-		return
-	}
-
-	parentNetworkId = state.deviceParentMap[data.deviceNetworkId]
-	if (parentNetworkId) {
-		device = getChildDevice(parentNetworkId).getChildDevice(data.deviceNetworkId)
-	} else {
-		device = getChildDevice(data.deviceNetworkId)
-	}
-
-	if (!device) {
-		logDebug("Device ${data.deviceNetworkId} not found")
-		return
-	}
-
-	device.createDeviceEventsFromEventList(eventList)
 }
 
 private String getPhoneId() {
