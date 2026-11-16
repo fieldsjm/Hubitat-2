@@ -31,6 +31,8 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.9 - Auto re-login with saved credentials when no refresh token is
+ *          stored, instead of failing until manual re-authentication.
  *   v1.8 - Add configurable periodic token refresh to prevent expired
  *          Device Management API tokens.
  *   v1.7 - Device Management API for newer cameras (Cam OG, etc).
@@ -59,7 +61,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.8" }
+public static final String version() { return "v1.9" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
@@ -1273,6 +1275,28 @@ private refreshAccessToken(Closure closure = {}) {
 
 	if (state.refreshingToken) {
 		logDebug('Token refresh already in progress. Skipping.')
+		return
+	}
+
+	// No refresh token stored (e.g. Wyze rejected it and the tokens were
+	// cleared): fall back to a full re-login with the saved credentials
+	// instead of failing until someone re-authenticates manually.
+	if (!state.refresh_token) {
+		if (settings.username && settings.password) {
+			logWarn('No refresh token stored. Attempting re-login with saved credentials.')
+			state.refreshingToken = true
+			try {
+				if (authenticateWyzeAccount(settings.username, settings.password)) {
+					logInfo('Re-login succeeded. Tokens restored.')
+				} else {
+					logError('Re-login failed. Manual re-authentication required.')
+				}
+			} finally {
+				state.refreshingToken = false
+			}
+		} else {
+			logError('No refresh token stored and no saved credentials. Manual re-authentication required.')
+		}
 		return
 	}
 
